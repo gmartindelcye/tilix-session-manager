@@ -422,6 +422,13 @@ If the pane target is stale (session renamed or window layout changed), the `tmu
 
 For provider-specific sessions (DeepSeek, OpenAI, Qwen, Gemini, etc.): `tilix-session restore` resumes with `headroom wrap claude -- -c`, which uses whichever API key is in the current shell environment. On a fresh boot the shell is clean — re-run the provider alias (`claude-deepseek-continue`, `claude-openai-continue`, etc.) manually to activate that backend.
 
+**Model picker note:** Claude Code's `/model` command always shows Anthropic models — it cannot list Mistral, Grok, or other provider models. To target a specific provider model, set `PROVIDER_MODEL` before launching:
+
+```bash
+PROVIDER_MODEL=mistral-large-latest claude-mistral
+PROVIDER_MODEL=grok-3 claude-grok
+```
+
 ### Plugins not installed
 
 ```bash

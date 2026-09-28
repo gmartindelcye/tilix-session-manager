@@ -182,6 +182,14 @@ tilix-session-manager/
 
 All provider aliases follow the same pattern: set `CLAUDE_API_KEY` + `CLAUDE_BASE_URL`, then call `headroom wrap claude`. The continue variants append `-- -c`.
 
+**Model picker limitation:** Claude Code's `/model` command always shows Anthropic's model catalog regardless of provider — this is hardcoded in the client and cannot be changed. The model name Claude Code selects (e.g. `claude-sonnet-4-5`) is sent to the provider's OpenAI-compatible API; whether the provider honours, remaps, or rejects it is provider-specific. To target a specific provider model, set `PROVIDER_MODEL` before launching:
+
+```bash
+PROVIDER_MODEL=mistral-large-latest claude-mistral
+PROVIDER_MODEL=grok-3 claude-grok
+PROVIDER_MODEL=deepseek-chat claude-deepseek
+```
+
 **After a reboot**, `tilix-session restore` automatically sends the appropriate resume command to each saved pane:
 - headroom panes → `headroom wrap claude -- -c`
 - bare claude panes → `claude -c`
