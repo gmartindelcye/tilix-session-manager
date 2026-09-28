@@ -286,6 +286,13 @@ cmd_restore() {
     if pgrep -x tilix >/dev/null 2>&1; then
         info "Tilix already running — skipping visual restore"
     else
+        # Write attach queue: each new Tilix terminal claims one entry and
+        # attaches to that tmux session (via ~/.local/bin/tilix-session-shell)
+        local i=0
+        while IFS= read -r sname && [[ -n "$sname" ]]; do
+            printf '%s' "$sname" > "$STATE_DIR/attach.$i"
+            (( i++ )) || true
+        done < "$TMUX_SESSION_LIST"
         LAST_SAVE=$(cat "$STATE_DIR/last-save" 2>/dev/null || echo "unknown")
         info "Opening Tilix with layout from: $LAST_SAVE"
         tilix -s tilix-session-restore &
