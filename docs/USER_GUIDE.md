@@ -4,10 +4,11 @@
 
 Normally when Tilix closes, reboots happen, or power dies — everything is gone. Every terminal window, running server, open directory. You start from scratch.
 
-This tool keeps two things alive:
+This tool keeps three things alive:
 
 - **Your running processes** (dev servers, watchers, SSH connections) — via tmux, which keeps sessions alive in the background even when the terminal window closes.
 - **Your Tilix layout** (tabs, windows, which session is open where) — via a saved JSON snapshot that reopens everything exactly as you left it.
+- **Your Claude Code sessions** — if you run Claude via headroom, `tilix-session restore` resumes your conversations in the right pane automatically.
 
 After a reboot: one command and you're back.
 
@@ -44,13 +45,13 @@ tmux
 
 ### What survives what
 
-| Event | tmux session | Tilix layout | Running processes |
-|-------|-------------|--------------|-------------------|
-| Close Tilix window | ✅ intact | ❌ gone | ✅ intact |
-| Reboot / power failure | depends* | ❌ gone | depends* |
-| `tilix-session restore` | ✅ restored | ✅ restored | ✅ restored |
+| Event | tmux session | Tilix layout | Running processes | Claude session |
+|-------|-------------|--------------|-------------------|----------------|
+| Close Tilix window | ✅ intact | ❌ gone | ✅ intact | ✅ intact |
+| Reboot / power failure | depends* | ❌ gone | depends* | ✅ on disk |
+| `tilix-session restore` | ✅ restored | ✅ restored | ✅ restored | ✅ resumed |
 
-*tmux-resurrect saves session state every 10 minutes automatically. After reboot it restores sessions on tmux start.
+*tmux-resurrect saves session state every 10 minutes automatically. After reboot it restores sessions on tmux start. Claude conversation history lives in `~/.claude/projects/` and survives reboots; `tilix-session restore` resumes headroom in the right pane.
 
 ---
 
@@ -140,6 +141,7 @@ tilix-session restore
 This:
 1. Triggers tmux-resurrect to restore all sessions and their processes
 2. Opens Tilix with your saved layout — each tab reconnected to its session
+3. Waits 2 seconds, then resumes any Claude Code sessions that were open — running `headroom wrap claude -- -c` in each pane so your conversations pick up where they left off
 
 If Tilix is already open, you can also restore manually:
 
@@ -223,17 +225,17 @@ All shortcuts use the prefix `Ctrl-a` (hold Ctrl, press a, release both, then pr
 ```
 tilix-session save
 ```
-Saves all active tmux session names and builds a Tilix layout JSON that maps each session to a tab. Also triggers tmux-resurrect to snapshot process state.
+Saves all active tmux session names and builds a Tilix layout JSON that maps each session to a tab. Also triggers tmux-resurrect to snapshot process state, and records which panes have Claude Code running via headroom.
 
 ```
 tilix-session restore
 ```
-Restores tmux sessions via tmux-resurrect, then opens Tilix with the saved layout. Run this after a reboot.
+Restores tmux sessions via tmux-resurrect, opens Tilix with the saved layout, then automatically resumes any saved Claude Code sessions in their panes.
 
 ```
 tilix-session status
 ```
-Shows last save time, active tmux sessions, recent resurrect files, and auto-save timer state.
+Shows last save time, active tmux sessions, recent resurrect files, saved Claude sessions, and auto-save timer state.
 
 ```
 tilix-session attach [name]
@@ -253,6 +255,39 @@ Disables and removes the auto-save timer.
 ---
 
 ## Common scenarios
+
+### Running Claude Code in a project session
+
+Start Claude inside a tmux session so it persists and restores. Pick the alias that matches your provider:
+
+```bash
+tilix-session attach myproject
+cd ~/dev/myproject
+
+claude-default       # Anthropic direct, via headroom
+claude-bare          # Anthropic direct, no headroom
+claude-deepseek      # DeepSeek  (DEEPSEEK_API_KEY in config/local.env)
+claude-openai        # OpenAI / GPT  (OPENAI_API_KEY)
+claude-qwen          # Qwen / Alibaba  (QWEN_API_KEY)
+claude-gemini        # Gemini  (GEMINI_API_KEY)
+claude-grok          # Grok / xAI  (GROK_API_KEY)
+claude-mistral       # Mistral  (MISTRAL_API_KEY)
+claude-custom        # any OpenAI-compatible endpoint  (CUSTOM_API_KEY + CUSTOM_BASE_URL)
+```
+
+Save the layout:
+
+```bash
+tilix-session save   # records which panes have Claude running and how (headroom or direct)
+```
+
+After a reboot:
+
+```bash
+tilix-session restore   # Tilix reopens; Claude resumes automatically in each saved pane
+```
+
+For provider-specific sessions (DeepSeek, OpenAI, etc.), `tilix-session restore` sends `headroom wrap claude -- -c` which uses whichever API key is currently in the shell. On a fresh boot the shell is clean, so re-run the provider alias (`claude-deepseek-continue`, `claude-openai-continue`, etc.) if you need a specific backend active.
 
 ### Running a dev server that survives closing Tilix
 
@@ -372,6 +407,20 @@ Confirm your config is loaded:
 tmux show-options -g prefix    # should show: prefix C-a
 tmux source ~/.tmux.conf       # reload if needed
 ```
+
+### Claude didn't resume after restore
+
+Check what was saved:
+
+```bash
+tilix-session status         # look for the "claude sessions" section
+```
+
+If the list is empty, Claude wasn't running when you last ran `tilix-session save`. Save while Claude is open, then restore.
+
+If the pane target is stale (session renamed or window layout changed), the `tmux send-keys` silently fails. Run `claude-default-continue` manually in the correct pane.
+
+For provider-specific sessions (DeepSeek, OpenAI, Qwen, Gemini, etc.): `tilix-session restore` resumes with `headroom wrap claude -- -c`, which uses whichever API key is in the current shell environment. On a fresh boot the shell is clean — re-run the provider alias (`claude-deepseek-continue`, `claude-openai-continue`, etc.) manually to activate that backend.
 
 ### Plugins not installed
 

@@ -89,6 +89,27 @@ else
     fi
 fi
 
+# ─── 7. Claude/headroom aliases ─────────────────────────────────────────────
+
+header "Claude aliases"
+ALIASES_SRC="$REPO_DIR/config/claude-aliases.sh"
+ZSHRC="$HOME/.zshrc"
+SOURCE_LINE="source \"$ALIASES_SRC\"  # tilix-session-manager"
+
+if grep -qF "$ALIASES_SRC" "$ZSHRC" 2>/dev/null; then
+    success "Claude aliases already sourced in ~/.zshrc"
+else
+    echo "" >> "$ZSHRC"
+    echo "$SOURCE_LINE" >> "$ZSHRC"
+    success "Added claude aliases to ~/.zshrc"
+fi
+
+LOCAL_ENV="$REPO_DIR/config/local.env"
+if [[ ! -f "$LOCAL_ENV" ]]; then
+    cp "$REPO_DIR/config/local.env.template" "$LOCAL_ENV"
+    info "Created config/local.env — add your DEEPSEEK_API_KEY if needed"
+fi
+
 # ─── Done ───────────────────────────────────────────────────────────────────
 
 echo ""
