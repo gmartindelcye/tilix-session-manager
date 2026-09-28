@@ -22,6 +22,7 @@ UNIT_NAME="tilix-session-autosave"
 
 die()  { echo "ERROR: $*" >&2; exit 1; }
 info() { echo "→ $*"; }
+warn() { echo "⚠ $*" >&2; }
 
 require() {
     for cmd in "$@"; do
@@ -58,7 +59,7 @@ cmd_save() {
     fi
 
     info "Building Tilix layout JSON..."
-    _build_layout_json > "$LAYOUT_FILE"
+    _build_layout_json
 
     info "Tracking claude sessions..."
     _save_claude_sessions
@@ -69,13 +70,17 @@ cmd_save() {
 }
 
 _build_layout_json() {
-    # Builds a Tilix session JSON that opens one tab per tmux session.
-    # Each tab attaches to its tmux session automatically.
-    python3 - "$TMUX_SESSION_LIST" <<'PYEOF'
+    # Writes a Tilix session JSON to both our state dir and Tilix's session store.
+    # Tilix's -s flag looks up sessions by name in ~/.local/share/tilix/sessions/.
+    local tilix_sessions_dir="${XDG_DATA_HOME:-$HOME/.local/share}/tilix/sessions"
+    mkdir -p "$tilix_sessions_dir"
+
+    python3 - "$TMUX_SESSION_LIST" "$LAYOUT_FILE" "$tilix_sessions_dir/tilix-session-restore.json" <<'PYEOF'
 import sys, json, os
 
-session_file = sys.argv[1]
+session_file, state_out, tilix_out = sys.argv[1], sys.argv[2], sys.argv[3]
 home = os.path.expanduser("~")
+profile = "2b7c4080-0ddd-46c5-8f23-563fd3ba789d"
 
 sessions = []
 try:
@@ -85,29 +90,35 @@ except FileNotFoundError:
     names = []
 
 if not names:
-    # Default: single terminal at home dir
     sessions.append({
         "name": "main",
+        "synchronized-input": False,
         "terminals": [{
+            "profile-uuid": profile,
+            "custom-title": "main",
             "command": "tmux new-session -A -s main",
             "directory": home,
-            "profile": "2b7c4080-0ddd-46c5-8f23-563fd3ba789d",
-            "title": "main"
+            "encoding": "UTF-8"
         }]
     })
 else:
     for name in names:
         sessions.append({
             "name": name,
+            "synchronized-input": False,
             "terminals": [{
+                "profile-uuid": profile,
+                "custom-title": name,
                 "command": f"tmux attach-session -t {name}",
                 "directory": home,
-                "profile": "2b7c4080-0ddd-46c5-8f23-563fd3ba789d",
-                "title": name
+                "encoding": "UTF-8"
             }]
         })
 
-print(json.dumps({"version": "1.0", "sessions": sessions}, indent=2))
+data = json.dumps({"version": "1.0", "sessions": sessions}, indent=2)
+for path in (state_out, tilix_out):
+    with open(path, "w") as f:
+        f.write(data)
 PYEOF
 }
 
@@ -223,22 +234,36 @@ cmd_restore() {
         die "No saved layout found at $LAYOUT_FILE — run 'tilix-session save' first"
     fi
 
+    local resurrect_script="$HOME/.tmux/plugins/tmux-resurrect/scripts/restore.sh"
+
     info "Restoring tmux sessions via tmux-resurrect..."
-    # tmux-resurrect restores sessions automatically on tmux server start
-    # Force a restore if tmux is not running
     if ! tmux list-sessions &>/dev/null 2>&1; then
-        tmux new-session -d -s _restore_init 2>/dev/null || true
-        sleep 0.5
-        tmux run-shell "$HOME/.tmux/plugins/tmux-resurrect/scripts/restore.sh" 2>/dev/null || true
-        tmux kill-session -t _restore_init 2>/dev/null || true
-        info "tmux-resurrect restore triggered"
+        if [[ ! -f "$resurrect_script" ]]; then
+            warn "tmux-resurrect not found at $resurrect_script — skipping restore"
+        else
+            tmux new-session -d -s _restore_init 2>/dev/null
+            # Run restore synchronously; tmux run-shell blocks until script exits
+            tmux run-shell "$resurrect_script"
+            # Wait up to 15s for at least one real session to appear
+            local waited=0
+            while [[ $waited -lt 15 ]]; do
+                local real_sessions
+                real_sessions=$(tmux list-sessions -F '#{session_name}' 2>/dev/null \
+                    | grep -v '^_restore_init$' | wc -l)
+                [[ $real_sessions -gt 0 ]] && break
+                sleep 1
+                (( waited++ ))
+            done
+            tmux kill-session -t _restore_init 2>/dev/null || true
+            info "tmux-resurrect restore complete"
+        fi
     else
         info "tmux already running — sessions intact"
     fi
 
     LAST_SAVE=$(cat "$STATE_DIR/last-save" 2>/dev/null || echo "unknown")
     info "Opening Tilix with layout from: $LAST_SAVE"
-    tilix --session="$LAYOUT_FILE" &
+    tilix -s tilix-session-restore &
     disown
 
     _resume_claude_sessions
