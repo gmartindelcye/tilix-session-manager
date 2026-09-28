@@ -283,10 +283,14 @@ cmd_restore() {
         info "tmux already running — sessions intact"
     fi
 
-    LAST_SAVE=$(cat "$STATE_DIR/last-save" 2>/dev/null || echo "unknown")
-    info "Opening Tilix with layout from: $LAST_SAVE"
-    tilix -s tilix-session-restore &
-    disown
+    if pgrep -x tilix >/dev/null 2>&1; then
+        info "Tilix already running — skipping visual restore"
+    else
+        LAST_SAVE=$(cat "$STATE_DIR/last-save" 2>/dev/null || echo "unknown")
+        info "Opening Tilix with layout from: $LAST_SAVE"
+        tilix -s tilix-session-restore &
+        disown
+    fi
 
     _resume_claude_sessions
 }
