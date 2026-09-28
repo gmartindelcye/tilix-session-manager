@@ -34,9 +34,9 @@ sudo apt install tilix git xclip
 
 ## Companion setup
 
-This repo is a Linux-specific addition intended for use alongside the private `Phalkon-Dev/claude-setup` repo, which sets up the base Claude Code environment (settings, plugins, hooks, and basic provider aliases). Install `claude-setup` first on any new machine, then layer this repo on top for Tilix + tmux session persistence and the extended multi-provider alias set.
+This repo is fully standalone. The only requirement for Claude session persistence is [headroom](https://headroom.ai) (`pip install headroom-ai`), which provides the proxy and the `headroom wrap claude` command used by the aliases.
 
-If `claude-setup` is already installed, its aliases load first and `tilix-session-manager`'s `config/claude-aliases.sh` sources second — the extended set wins automatically with no manual intervention.
+For Phalkon Dev users: this repo is also designed to complement the private `Phalkon-Dev/claude-setup` repo (base Claude Code environment — settings, plugins, hooks). Install `claude-setup` first, then layer this repo on top. If both are installed, `claude-setup`'s aliases load first and `config/claude-aliases.sh` sources second — the extended multi-provider set wins automatically with no manual intervention.
 
 ## Install on a new machine
 
