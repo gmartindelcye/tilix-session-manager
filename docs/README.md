@@ -13,17 +13,48 @@ Two complementary layers:
 
 tmux-continuum auto-saves every 10 min in the background. The `tilix-session` script ties Tilix layout to tmux session names so everything reopens correctly.
 
-## Quick start
+## Dependencies
+
+| Dependency | Required | Installed by | Notes |
+|------------|----------|-------------|-------|
+| `tmux` | ✅ | `install.sh` via apt | v3.0+ recommended |
+| `tilix` | ✅ | manual | `sudo apt install tilix` |
+| `git` | ✅ | manual | to clone this repo and TPM |
+| `python3` | ✅ | pre-installed on Ubuntu | builds Tilix layout JSON |
+| `systemd` (user session) | optional | pre-installed | for auto-save timer |
+| `xclip` | optional | `sudo apt install xclip` | clipboard support in tmux copy mode |
+
+Install missing manual deps before running `install.sh`:
 
 ```bash
-# Install the script to your PATH
-sudo ln -s ~/dev/gmartindelcye/tilix-session-manager/scripts/tilix-session /usr/local/bin/tilix-session
+sudo apt install tilix git xclip
+```
 
-# First save (do this while Tilix + tmux are running)
+## Install on a new machine
+
+```bash
+git clone git@github.com:gmartindelcye/tilix-session-manager.git ~/dev/gmartindelcye/tilix-session-manager
+cd ~/dev/gmartindelcye/tilix-session-manager
+./scripts/install.sh
+```
+
+That single script:
+1. Installs tmux (via apt)
+2. Installs TPM + plugins (resurrect, continuum, sensible)
+3. Deploys `config/tmux.conf` → `~/.tmux.conf` (backs up any existing one)
+4. Symlinks `tilix-session` to `/usr/local/bin`
+5. Enables the systemd 10-min auto-save timer
+
+Pass `--no-timer` to skip the systemd timer (e.g. on servers without a user session).
+
+## Quick start (first use)
+
+```bash
+# Start a tmux session for your main workspace
+tilix-session attach main
+
+# Save current state
 tilix-session save
-
-# Set up auto-save systemd timer (10-min interval)
-tilix-session install
 
 # After a reboot — restore everything
 tilix-session restore
@@ -85,12 +116,25 @@ tmux-continuum saves automatically, but you can also trigger manually:
 
 Saved files are in `~/.tmux/resurrect/`.
 
-## Files
+## Repo layout
 
 ```
-~/.tmux.conf                          tmux config (plugins, keybindings, theme)
-~/.tmux/plugins/                      TPM plugins
-~/.tmux/resurrect/                    tmux-resurrect snapshots (auto-managed)
+tilix-session-manager/
+├── config/
+│   └── tmux.conf                     source-of-truth tmux config
+├── scripts/
+│   ├── install.sh                    bootstrap script for new machines
+│   └── tilix-session                 save/restore/status CLI
+└── docs/
+    └── README.md
+```
+
+## Runtime files (created on first use)
+
+```
+~/.tmux.conf                          deployed by install.sh from config/tmux.conf
+~/.tmux/plugins/                      TPM + resurrect + continuum + sensible
+~/.tmux/resurrect/                    tmux-resurrect snapshots (auto-managed, ~10 files)
 ~/.local/share/tilix-session/
   layout.json                         Tilix session file (tabs → tmux sessions)
   tmux-sessions.txt                   Session names at last save
