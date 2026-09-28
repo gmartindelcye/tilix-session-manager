@@ -32,6 +32,12 @@ Install missing manual deps before running `install.sh`:
 sudo apt install tilix git xclip
 ```
 
+## Companion setup
+
+This repo is a Linux-specific addition intended for use alongside the private `Phalkon-Dev/claude-setup` repo, which sets up the base Claude Code environment (settings, plugins, hooks, and basic provider aliases). Install `claude-setup` first on any new machine, then layer this repo on top for Tilix + tmux session persistence and the extended multi-provider alias set.
+
+If `claude-setup` is already installed, its aliases load first and `tilix-session-manager`'s `config/claude-aliases.sh` sources second — the extended set wins automatically with no manual intervention.
+
 ## Install on a new machine
 
 ```bash
