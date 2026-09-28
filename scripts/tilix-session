@@ -185,7 +185,17 @@ if not panes:
     sys.exit(0)
 
 PROMPT_CHARS = ('$', '%', '❯', '➜', '>', '#', '❮')
-PROMPT_MAX_WAIT = 45
+CLAUDE_PROCS = {"python", "python3", "node"}
+PROMPT_MAX_WAIT = 15
+
+def current_command(target):
+    r = subprocess.run(
+        ["tmux", "list-panes", "-t", target, "-F", "#{pane_current_command}"],
+        capture_output=True, text=True
+    )
+    if r.returncode != 0:
+        return None
+    return r.stdout.strip()
 
 def wait_for_prompt(target):
     deadline = time.time() + PROMPT_MAX_WAIT
@@ -198,7 +208,10 @@ def wait_for_prompt(target):
             return "pane-gone"
         last = r.stdout.rstrip().split('\n')[-1].rstrip() if r.stdout.strip() else ""
         if last and any(last.endswith(c) for c in PROMPT_CHARS):
-            return "ready"
+            # Confirm it's actually a shell, not stale scrollback above a running process
+            cmd = current_command(target)
+            if cmd is not None and cmd not in CLAUDE_PROCS:
+                return "ready"
         time.sleep(0.5)
     return "timeout"
 
@@ -208,12 +221,21 @@ for pane in panes:
     target, cwd = pane["target"], pane["cwd"]
     launcher = pane.get("launcher", "direct")
     cmd = "headroom wrap claude -- -c" if launcher == "headroom" else "claude -c"
+
+    proc = current_command(target)
+    if proc is None:
+        print(f"  → {target} [{launcher}] ({cwd}): pane not found")
+        continue
+    if proc in CLAUDE_PROCS:
+        print(f"  → {target} [{launcher}] ({cwd}): already running — skipped")
+        continue
+
     state = wait_for_prompt(target)
     if state == "pane-gone":
         print(f"  → {target} [{launcher}] ({cwd}): pane not found")
         continue
     if state == "timeout":
-        print(f"  → {target} [{launcher}] ({cwd}): timed out waiting for prompt — sending anyway")
+        print(f"  → {target} [{launcher}] ({cwd}): timed out — sending anyway")
     result = subprocess.run(
         ["tmux", "send-keys", "-t", target, cmd, "Enter"],
         capture_output=True
