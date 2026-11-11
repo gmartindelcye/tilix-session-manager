@@ -129,12 +129,21 @@ print(lst[0] if lst else '')
 
     cat > "$tmp_dir/helper.py" << 'PYEOF'
 #!/usr/bin/env python3
-import json, os, stat, sys
+import json, os, re, shlex, stat, sys
 
 panes_file, profile, tmp_dir, home = sys.argv[1:5]
 
 with open(panes_file) as f:
     pane_list = json.load(f)["panes"]
+
+# Reject any cwd containing control characters or newlines
+def safe_cwd(cwd):
+    if re.search(r'[\x00-\x1f]', cwd):
+        raise ValueError(f"Unsafe directory path rejected: {cwd!r}")
+    return cwd
+
+for p in pane_list:
+    safe_cwd(p["cwd"])
 
 print("\nSaved panes:")
 for i, p in enumerate(pane_list, 1):
@@ -155,7 +164,10 @@ for t in range(1, n_tabs + 1):
 default_cmd = input("\nCommand for project panes [claude-default]: ").strip() or "claude-default"
 
 def cmd(cwd):
-    return None if cwd == home else f"zsh -ic 'cd {cwd} && {default_cmd}; exec zsh'"
+    if cwd == home:
+        return None
+    inner = shlex.quote(f"cd {shlex.quote(cwd)} && {default_cmd}; exec zsh")
+    return f"zsh -ic {inner}"
 
 for i, tab in enumerate(tabs):
     path = os.path.join(tmp_dir, f"tab{i+1}.sh")
@@ -164,18 +176,21 @@ for i, tab in enumerate(tabs):
 
     if layout == "v":
         c = cmd(panes[1]["cwd"])
-        lines += [f'tilix -a session-add-right -p "$PROFILE" {f"-e \\"{c}\\"" if c else f"-w \\"{panes[1][\"cwd\"]}\\""}', "sleep 0.3"]
+        arg = f"-e {shlex.quote(c)}" if c else f"-w {shlex.quote(panes[1]['cwd'])}"
+        lines += [f'tilix -a session-add-right -p "$PROFILE" {arg}', "sleep 0.3"]
     else:
         for action, idx in [("session-add-right", 1), ("session-add-down", 2)]:
             c = cmd(panes[idx]["cwd"])
-            lines += [f'tilix -a {action} -p "$PROFILE" {f"-e \\"{c}\\"" if c else f"-w \\"{panes[idx][\"cwd\"]}\\""}', "sleep 0.3"]
+            arg = f"-e {shlex.quote(c)}" if c else f"-w {shlex.quote(panes[idx]['cwd'])}"
+            lines += [f"tilix -a {action} -p \"$PROFILE\" {arg}", "sleep 0.3"]
 
     if i < len(tabs) - 1:
         nxt = os.path.join(tmp_dir, f"tab{i+2}.sh")
-        lines += ["tilix -a app-new-session", "sleep 0.8", f'xdotool type "bash {nxt}"', "xdotool key Return", "sleep 0.5"]
+        lines += ["tilix -a app-new-session", "sleep 0.8",
+                  f"xdotool type {shlex.quote('bash ' + nxt)}", "xdotool key Return", "sleep 0.5"]
 
     c0 = cmd(panes[0]["cwd"])
-    lines += [f'cd "{panes[0]["cwd"]}"', f"exec {c0}" if c0 else "exec zsh"]
+    lines += [f"cd {shlex.quote(panes[0]['cwd'])}", f"exec {c0}" if c0 else "exec zsh"]
 
     with open(path, "w") as f:
         f.write("\n".join(lines) + "\n")
