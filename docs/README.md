@@ -1,212 +1,133 @@
 # tilix-session-manager
 
-Survives reboots and power failures. Saves Tilix window layout + all tmux sessions automatically; restores everything in one command.
+Saves and restores Tilix terminal sessions across reboots and power failures. Combines native Tilix pane snapshots with tmux session persistence and automatic Claude Code resumption.
 
 ## How it works
 
-Three complementary layers:
-
 | Layer | Tool | What it saves |
 |-------|------|---------------|
+| **Pane directories** | `tilix-session pane-save` | Active Tilix pane working directories |
 | **Process persistence** | tmux + tmux-resurrect | Running processes, pane contents, CWDs |
-| **Layout restore** | tilix-session script | Tilix tabs/windows mapped to tmux sessions |
-| **AI session restore** | tilix-session + headroom | Claude Code conversations resumed in the right pane |
+| **Tilix layout** | `tilix-session save/restore` | Tilix tabs mapped to tmux sessions |
+| **AI sessions** | headroom | Claude Code conversations resumed automatically |
 
-tmux-continuum auto-saves every 10 min in the background. The `tilix-session` script ties Tilix layout to tmux session names so everything reopens correctly. If any panes were running Claude Code via `headroom`, they are automatically resumed in continue mode after restore.
-
-## Dependencies
-
-| Dependency | Required | Installed by | Notes |
-|------------|----------|-------------|-------|
-| `tmux` | ✅ | `install.sh` via apt | v3.0+ recommended |
-| `tilix` | ✅ | manual | `sudo apt install tilix` |
-| `git` | ✅ | manual | to clone this repo and TPM |
-| `python3` | ✅ | pre-installed on Ubuntu | builds Tilix layout JSON |
-| `systemd` (user session) | optional | pre-installed | for auto-save timer |
-| `xclip` | optional | `sudo apt install xclip` | clipboard support in tmux copy mode |
-| `headroom` | optional | `pip install headroom-ai` | required for Claude session restore |
-
-Install missing manual deps before running `install.sh`:
+## Install
 
 ```bash
 sudo apt install tilix git xclip
-```
-
-## Companion setup
-
-This repo is fully standalone. The only requirement for Claude session persistence is [headroom](https://headroom.ai) (`pip install headroom-ai`), which provides the proxy and the `headroom wrap claude` command used by the aliases.
-
-For Phalkon Dev users: this repo is also designed to complement the private `Phalkon-Dev/claude-setup` repo (base Claude Code environment — settings, plugins, hooks). Install `claude-setup` first, then layer this repo on top. If both are installed, `claude-setup`'s aliases load first and `config/claude-aliases.sh` sources second — the extended multi-provider set wins automatically with no manual intervention.
-
-## Install on a new machine
-
-```bash
 git clone git@github.com:gmartindelcye/tilix-session-manager.git ~/dev/gmartindelcye/tilix-session-manager
 cd ~/dev/gmartindelcye/tilix-session-manager
-cp config/local.env.template config/local.env   # add DEEPSEEK_API_KEY if using DeepSeek
+cp config/local.env.template config/local.env   # add API keys
 ./scripts/install.sh
 ```
 
-That single script:
-1. Installs tmux (via apt)
-2. Installs TPM + plugins (resurrect, continuum, sensible)
-3. Deploys `config/tmux.conf` → `~/.tmux.conf` (backs up any existing one)
-4. Symlinks `tilix-session` to `/usr/local/bin`
-5. Enables the systemd 10-min auto-save timer
-6. Sources `config/claude-aliases.sh` from `~/.zshrc` (Claude + headroom aliases)
+No sudo required for the install script. Commands are linked to `~/.local/bin`.
 
-Pass `--no-timer` to skip the systemd timer (e.g. on servers without a user session).
-
-## Quick start (first use)
-
-```bash
-# Start a tmux session for your main workspace
-tilix-session attach main
-
-# Save current state
-tilix-session save
-
-# After a reboot — restore everything
-tilix-session restore
-```
+Pass `--no-timer` to skip the systemd auto-save timer.
 
 ## Commands
 
 ```
-tilix-session save       Save current tmux sessions → Tilix layout JSON
-tilix-session restore    Restore last saved layout in Tilix
-tilix-session status     Show saved sessions and last save time
-tilix-session attach     Attach to (or create) the main tmux session
-tilix-session install    Install systemd auto-save timer (runs every 10m)
-tilix-session uninstall  Remove systemd timer
+tilix-session pane-save      Snapshot active Tilix pane directories
+tilix-session pane-restore   Interactively rebuild Tilix layout from snapshot
+tilix-session save           Save tmux sessions + Tilix layout + pane state
+tilix-session restore        Restore tmux layout in Tilix + resume Claude sessions
+tilix-session status         Show saved sessions and last save time
+tilix-session attach         Attach to (or create) a named tmux session
+tilix-session install        Install systemd auto-save timer (every 10 min)
+tilix-session uninstall      Remove systemd timer
+
+tilix-sessions               List active Tilix panes (TTY, directory, running command)
+tilix-sessions --json        JSON output
+tilix-sessions --watch       Live refresh every 2s
 ```
 
-## Daily workflow
-
-Open Tilix and start a tmux session for each project:
+## Quick start — native Tilix pane workflow
 
 ```bash
-# Instead of bare terminals, always use tmux
-tilix-session attach myproject      # creates or reattaches 'myproject' session
-tilix-session attach devserver      # another session for a running server
+# Save current pane layout before closing / rebooting
+tilix-session pane-save
+
+# Restore interactively after reboot
+tilix-session pane-restore
 ```
 
-When you have the layout you want, save it:
+`pane-restore` shows your saved directories, asks how many tabs, the layout per tab, and which directories go where. Supported layouts:
+
+- **`v`** — 2-pane vertical split (left | right)
+- **`t`** — tall-left: 1 big left pane + 2 stacked right panes
+
+## Quick start — tmux workflow
 
 ```bash
-tilix-session save
+tilix-session attach main      # start or reattach tmux session
+tilix-session save             # snapshot layout + processes
+tilix-session restore          # restore after reboot
 ```
 
-After reboot:
+## Auto-save
 
-```bash
-tilix-session restore    # reopens Tilix, reattaches all tmux sessions
-```
+The systemd timer runs `tilix-session save` every 10 minutes automatically (includes pane-save when Tilix is running). tmux-continuum also saves tmux state every 10 minutes independently.
 
-## tmux quick reference
+## Claude Code aliases
 
-| Key | Action |
-|-----|--------|
-| `Ctrl-a |` | Split vertical |
-| `Ctrl-a -` | Split horizontal |
-| `Ctrl-a c` | New window |
-| `Ctrl-a h/j/k/l` | Navigate panes |
-| `Ctrl-a d` | Detach (session stays alive) |
-| `Shift+←/→` | Previous/next window |
-| `Ctrl-a r` | Reload tmux config |
+Installed from `config/claude-aliases.sh` via `install.sh`:
 
-Prefix is `Ctrl-a` (not the default `Ctrl-b`).
+| Alias | Provider |
+|-------|----------|
+| `claude-default` | Anthropic direct (via headroom) |
+| `claude-bare` | Anthropic direct (no headroom) |
+| `claude-deepseek` | DeepSeek |
+| `claude-openai` | OpenAI / GPT |
+| `claude-qwen` | Qwen (Alibaba) |
+| `claude-gemini` | Gemini (Google) |
+| `claude-grok` | Grok (xAI) |
+| `claude-mistral` | Mistral |
+| `claude-custom` | Any OpenAI-compatible endpoint |
 
-## tmux-resurrect manual save/restore
+Each alias has a `-continue` variant (e.g. `claude-default-continue`) that resumes the last conversation.
 
-tmux-continuum saves automatically, but you can also trigger manually:
+## Dependencies
 
-- **Save**: `Ctrl-a` then `Ctrl-s`
-- **Restore**: `Ctrl-a` then `Ctrl-r`
-
-Saved files are in `~/.tmux/resurrect/`.
+| Dependency | Required | Notes |
+|------------|----------|-------|
+| `tilix` | ✅ | `sudo apt install tilix` |
+| `python3` | ✅ | pre-installed on Ubuntu |
+| `xdotool` | ✅ | required for pane-restore tab creation |
+| `tmux` | optional | for tmux workflow; installed by `install.sh` |
+| `systemd` | optional | for auto-save timer |
+| `xclip` | optional | clipboard in tmux copy mode |
+| `headroom` | optional | for Claude session auto-resume |
 
 ## Repo layout
 
 ```
 tilix-session-manager/
 ├── config/
-│   ├── tmux.conf                     source-of-truth tmux config
-│   ├── claude-aliases.sh             portable Claude/headroom shell aliases
-│   └── local.env.template            copy → local.env, add API keys (gitignored)
+│   ├── tmux.conf               source-of-truth tmux config
+│   ├── claude-aliases.sh       Claude/headroom shell aliases
+│   └── local.env.template      copy → local.env, add API keys (gitignored)
 ├── scripts/
-│   ├── install.sh                    bootstrap script for new machines
-│   └── tilix-session                 save/restore/status CLI
+│   ├── install.sh              bootstrap for new machines
+│   ├── tilix-session           main CLI (save/restore/pane-save/pane-restore/...)
+│   └── tilix-sessions.sh       pane scanner utility
 └── docs/
-    └── README.md
+    ├── README.md
+    └── USER_GUIDE.md
 ```
 
-## Runtime files (created on first use)
+## Runtime files
 
 ```
-~/.tmux.conf                          deployed by install.sh from config/tmux.conf
-~/.tmux/plugins/                      TPM + resurrect + continuum + sensible
-~/.tmux/resurrect/                    tmux-resurrect snapshots (auto-managed, ~10 files)
+~/.local/bin/
+  tilix-session               symlink → scripts/tilix-session
+  tilix-sessions              symlink → scripts/tilix-sessions.sh
 ~/.local/share/tilix-session/
-  layout.json                         Tilix session file (tabs → tmux sessions)
-  tmux-sessions.txt                   Session names at last save
-  last-save                           Timestamp of last save
+  panes.json                  saved Tilix pane directories
+  layout.json                 Tilix session file (tabs → tmux sessions)
+  tmux-sessions.txt           session names at last save
+  last-save                   timestamp of last save
 ~/.config/systemd/user/
   tilix-session-autosave.service
   tilix-session-autosave.timer
-```
-
-## What survives a power failure
-
-| Item | Survives? | Notes |
-|------|-----------|-------|
-| tmux session names | ✅ | Restored by tmux-resurrect |
-| Running processes | ✅ | Restored by tmux-resurrect |
-| Pane contents (scrollback) | ✅ | `@resurrect-capture-pane-contents on` |
-| Tilix tab layout | ✅ | Restored by `tilix-session restore` |
-| Claude Code conversations | ✅ | History on disk; `tilix-session restore` resumes via headroom |
-| Unsaved file edits | ❌ | Save your files |
-| Active SSH connections | ❌ | tmux keeps the pane; connection drops |
-
-## Claude Code + headroom
-
-`tilix-session` tracks which panes are running Claude Code — whether via [headroom](https://headroom.ai) or the bare `claude` binary — and resumes them automatically on restore.
-
-**Aliases installed by `install.sh`** (defined in `config/claude-aliases.sh`):
-
-| Alias | Provider | Requires |
-|-------|----------|---------|
-| `claude-default` / `claude-default-continue` | Anthropic (direct via headroom) | — |
-| `claude-bare` / `claude-bare-continue` | Anthropic (no headroom) | — |
-| `claude-deepseek` / `claude-deepseek-continue` | DeepSeek | `DEEPSEEK_API_KEY` |
-| `claude-openai` / `claude-openai-continue` | OpenAI / GPT | `OPENAI_API_KEY` |
-| `claude-qwen` / `claude-qwen-continue` | Qwen (Alibaba) | `QWEN_API_KEY` |
-| `claude-gemini` / `claude-gemini-continue` | Gemini (Google) | `GEMINI_API_KEY` |
-| `claude-grok` / `claude-grok-continue` | Grok (xAI) | `GROK_API_KEY` |
-| `claude-mistral` / `claude-mistral-continue` | Mistral | `MISTRAL_API_KEY` |
-| `claude-custom` / `claude-custom-continue` | Any OpenAI-compatible endpoint | `CUSTOM_API_KEY` + `CUSTOM_BASE_URL` |
-
-All provider aliases follow the same pattern: set `CLAUDE_API_KEY` + `CLAUDE_BASE_URL`, then call `headroom wrap claude`. The continue variants append `-- -c`.
-
-**Model picker limitation:** Claude Code's `/model` command always shows Anthropic's model catalog regardless of provider — this is hardcoded in the client and cannot be changed. The model name Claude Code selects (e.g. `claude-sonnet-4-5`) is sent to the provider's OpenAI-compatible API; whether the provider honours, remaps, or rejects it is provider-specific. To target a specific provider model, set `PROVIDER_MODEL` before launching:
-
-```bash
-PROVIDER_MODEL=mistral-large-latest claude-mistral
-PROVIDER_MODEL=grok-3 claude-grok
-PROVIDER_MODEL=deepseek-chat claude-deepseek
-```
-
-**After a reboot**, `tilix-session restore` automatically sends the appropriate resume command to each saved pane:
-- headroom panes → `headroom wrap claude -- -c`
-- bare claude panes → `claude -c`
-
-Sessions resume in the correct project directory with conversation history intact. If you were using a provider other than the default (e.g. DeepSeek), re-run its continue alias (`claude-deepseek-continue`) to reactivate the API key in that pane.
-
-**Machine-specific config** (`config/local.env`, gitignored — copy from `local.env.template`):
-
-```bash
-DEEPSEEK_API_KEY=...
-OPENAI_API_KEY=...
-QWEN_API_KEY=...
-GEMINI_API_KEY=...
 ```
