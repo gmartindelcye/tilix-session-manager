@@ -119,8 +119,15 @@ cmd_pane_restore() {
     profile=$(python3 -c "
 import subprocess, ast
 r = subprocess.run(['dconf','read','/com/gexperts/Tilix/profiles/list'], capture_output=True, text=True)
-lst = ast.literal_eval(r.stdout.strip())
-print(lst[0] if lst else '')
+out = r.stdout.strip()
+if out:
+    lst = ast.literal_eval(out)
+    print(lst[0] if lst else '')
+else:
+    # fallback: list the profiles/ directory
+    r2 = subprocess.run(['dconf','list','/com/gexperts/Tilix/profiles/'], capture_output=True, text=True)
+    entries = [e.rstrip('/') for e in r2.stdout.splitlines() if e.strip().rstrip('/')]
+    print(entries[0] if entries else '')
 " 2>/dev/null) || true
     [[ -z "$profile" ]] && die "Could not detect Tilix profile UUID"
 
@@ -206,6 +213,7 @@ PYEOF
     [[ ! -f "$tmp_dir/tab1.sh" ]] && { rm -rf "$tmp_dir"; die "No setup script generated"; }
     tilix -e "bash $tmp_dir/tab1.sh" &
     disown
+}
 
 _build_layout_json() {
     # Writes a Tilix session JSON to both our state dir and Tilix's session store.

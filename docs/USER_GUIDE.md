@@ -226,6 +226,22 @@ Then: `systemctl --user daemon-reload && systemctl --user restart tilix-session-
 
 ## Troubleshooting
 
+**`pane-restore` fails with "Could not detect Tilix profile UUID"**
+The `profiles/list` dconf key may be empty even when profiles exist. This is handled automatically via a fallback to `dconf list /com/gexperts/Tilix/profiles/`. If it still fails, check that dconf is accessible: `dconf list /com/gexperts/Tilix/profiles/` should return at least one UUID.
+
+**Manually seeding `panes.json` from a process snapshot**
+If `pane-save` can't run (e.g. Tilix isn't open), you can create the restore file by hand. Inspect running panes with `tilix-sessions.sh --json` or any process listing tool, then write `~/.local/share/tilix-session/panes.json`:
+```json
+{
+  "version": "1.0",
+  "panes": [
+    {"tty": "pts/0", "cwd": "/home/gmartin/dev/Phalkon-Dev/phalkon-compliance"},
+    {"tty": "pts/1", "cwd": "/home/gmartin/dev/Phalkon-Dev/phalkon-infra"}
+  ]
+}
+```
+Then run `tilix-session pane-restore` normally.
+
 **`pane-restore` splits land in the wrong tab**
 Increase the sleep delays. Edit the generated setup scripts in `/tmp/tilix-restore-*/` before they exit, or raise the `sleep 0.8` values in the `cmd_pane_restore` function in `scripts/tilix-session`.
 
