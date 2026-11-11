@@ -62,26 +62,27 @@ success "Plugins installed: $(ls ~/.tmux/plugins/ | tr '\n' ' ')"
 
 # ─── 5. tilix-session script ────────────────────────────────────────────────
 
-header "tilix-session script"
-SCRIPT_SRC="$REPO_DIR/scripts/tilix-session"
-chmod +x "$SCRIPT_SRC"
+header "tilix-session commands → ~/.local/bin"
+LOCAL_BIN="$HOME/.local/bin"
+mkdir -p "$LOCAL_BIN"
 
-LINK="/usr/local/bin/tilix-session"
-if [[ -L "$LINK" ]] || [[ -f "$LINK" ]]; then
-    info "Removing existing $LINK"
-    sudo rm -f "$LINK"
-fi
-sudo ln -s "$SCRIPT_SRC" "$LINK"
-success "tilix-session → $LINK"
+for script in tilix-session tilix-sessions.sh; do
+    src="$REPO_DIR/scripts/$script"
+    name="${script%.sh}"          # strip .sh so both become bare commands
+    link="$LOCAL_BIN/$name"
+    chmod +x "$src"
+    ln -sf "$src" "$link"
+    success "$name → $link"
+done
 
-SCANNER_SRC="$REPO_DIR/scripts/tilix-sessions.sh"
-chmod +x "$SCANNER_SRC"
-SCANNER_LINK="/usr/local/bin/tilix-sessions"
-if [[ -L "$SCANNER_LINK" ]] || [[ -f "$SCANNER_LINK" ]]; then
-    sudo rm -f "$SCANNER_LINK"
+# Ensure ~/.local/bin is in PATH (add to .zshrc if missing)
+if ! echo "$PATH" | grep -q "$LOCAL_BIN"; then
+    if ! grep -qF "$LOCAL_BIN" "$HOME/.zshrc" 2>/dev/null; then
+        echo "" >> "$HOME/.zshrc"
+        echo 'export PATH="$HOME/.local/bin:$PATH"  # tilix-session-manager' >> "$HOME/.zshrc"
+        info "Added ~/.local/bin to PATH in ~/.zshrc (restart shell or: source ~/.zshrc)"
+    fi
 fi
-sudo ln -s "$SCANNER_SRC" "$SCANNER_LINK"
-success "tilix-sessions → $SCANNER_LINK"
 
 # ─── 6. Systemd auto-save timer ─────────────────────────────────────────────
 
@@ -127,9 +128,10 @@ echo " tilix-session-manager installed successfully"
 echo "══════════════════════════════════════════════"
 echo ""
 echo " Quick start:"
-echo "   tilix-session attach main    # start/attach tmux session"
-echo "   tilix-session save           # snapshot current state"
-echo "   tilix-session restore        # restore after reboot"
+echo "   tilix-session pane-save      # snapshot Tilix pane directories"
+echo "   tilix-session pane-restore   # interactively rebuild layout"
+echo "   tilix-session save           # snapshot tmux + pane state"
+echo "   tilix-session restore        # restore tmux layout in Tilix"
 echo "   tilix-session status         # check what's saved"
 echo ""
 echo " tmux prefix: Ctrl-a  (not Ctrl-b)"
