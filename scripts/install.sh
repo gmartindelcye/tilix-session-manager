@@ -74,6 +74,15 @@ fi
 sudo ln -s "$SCRIPT_SRC" "$LINK"
 success "tilix-session → $LINK"
 
+SCANNER_SRC="$REPO_DIR/scripts/tilix-sessions.sh"
+chmod +x "$SCANNER_SRC"
+SCANNER_LINK="/usr/local/bin/tilix-sessions"
+if [[ -L "$SCANNER_LINK" ]] || [[ -f "$SCANNER_LINK" ]]; then
+    sudo rm -f "$SCANNER_LINK"
+fi
+sudo ln -s "$SCANNER_SRC" "$SCANNER_LINK"
+success "tilix-sessions → $SCANNER_LINK"
+
 # ─── 6. Systemd auto-save timer ─────────────────────────────────────────────
 
 header "systemd timer"

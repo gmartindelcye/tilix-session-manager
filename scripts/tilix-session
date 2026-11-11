@@ -3,12 +3,14 @@
 # Survives reboots and power failures via tmux-resurrect + layout snapshots.
 #
 # Usage:
-#   tilix-session save       Save current tmux sessions → Tilix layout JSON
-#   tilix-session restore    Restore last saved layout in Tilix
-#   tilix-session status     Show saved sessions and last save time
-#   tilix-session attach     Attach to (or create) the main tmux session
-#   tilix-session install    Install systemd auto-save timer (runs every 10m)
-#   tilix-session uninstall  Remove systemd timer
+#   tilix-session save           Save tmux sessions + Tilix pane state
+#   tilix-session restore        Restore tmux layout in Tilix
+#   tilix-session pane-save      Snapshot active Tilix pane directories
+#   tilix-session pane-restore   Interactively rebuild Tilix layout from snapshot
+#   tilix-session status         Show saved sessions and last save time
+#   tilix-session attach         Attach to (or create) the main tmux session
+#   tilix-session install        Install systemd auto-save timer (runs every 10m)
+#   tilix-session uninstall      Remove systemd timer
 
 set -euo pipefail
 
@@ -67,7 +69,128 @@ cmd_save() {
     TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
     echo "$TIMESTAMP" > "$STATE_DIR/last-save"
     info "Saved → $LAYOUT_FILE (${TIMESTAMP})"
+
+    # Also snapshot Tilix panes if Tilix is running
+    if pgrep -x tilix >/dev/null 2>&1; then
+        cmd_pane_save --quiet || true
+    fi
 }
+
+# ─── Pane Save ──────────────────────────────────────────────────────────────
+
+cmd_pane_save() {
+    local quiet=false
+    [[ "${1:-}" == "--quiet" ]] && quiet=true
+
+    ensure_state_dir
+    local scanner
+    scanner="$(dirname "$(realpath "$0")")/tilix-sessions.sh"
+    [[ ! -x "$scanner" ]] && { $quiet || warn "tilix-sessions.sh not found — skipping pane save"; return 0; }
+
+    local tmp_raw panes_file="$STATE_DIR/panes.json"
+    tmp_raw=$(mktemp)
+
+    "$scanner" --json > "$tmp_raw" 2>/dev/null || { rm -f "$tmp_raw"; $quiet || warn "Tilix not running — skipping pane save"; return 0; }
+
+    python3 - "$tmp_raw" "$panes_file" <<'PYEOF'
+import json, sys
+with open(sys.argv[1]) as f:
+    data = json.load(f)
+seen = {}
+for entry in data:
+    tty = entry.get("tty", "")
+    if tty and tty not in seen:
+        seen[tty] = {"tty": tty, "cwd": entry.get("cwd", "")}
+result = {"version": "1.0", "panes": list(seen.values())}
+with open(sys.argv[2], 'w') as f:
+    json.dump(result, f, indent=2)
+print(f"Panes saved: {len(seen)} → {sys.argv[2]}")
+PYEOF
+    rm -f "$tmp_raw"
+}
+
+# ─── Pane Restore ───────────────────────────────────────────────────────────
+
+cmd_pane_restore() {
+    local panes_file="$STATE_DIR/panes.json"
+    [[ ! -f "$panes_file" ]] && die "No saved panes — run 'tilix-session pane-save' first"
+
+    local profile
+    profile=$(python3 -c "
+import subprocess, ast
+r = subprocess.run(['dconf','read','/com/gexperts/Tilix/profiles/list'], capture_output=True, text=True)
+lst = ast.literal_eval(r.stdout.strip())
+print(lst[0] if lst else '')
+" 2>/dev/null) || true
+    [[ -z "$profile" ]] && die "Could not detect Tilix profile UUID"
+
+    local tmp_dir
+    tmp_dir=$(mktemp -d /tmp/tilix-restore-XXXXXX)
+
+    cat > "$tmp_dir/helper.py" << 'PYEOF'
+#!/usr/bin/env python3
+import json, os, stat, sys
+
+panes_file, profile, tmp_dir, home = sys.argv[1:5]
+
+with open(panes_file) as f:
+    pane_list = json.load(f)["panes"]
+
+print("\nSaved panes:")
+for i, p in enumerate(pane_list, 1):
+    print(f"  [{i}] {p['cwd']}")
+
+n_tabs = int(input("\nHow many tabs? ").strip())
+
+tabs = []
+for t in range(1, n_tabs + 1):
+    print(f"\nTab {t}:")
+    print("  v = vertical split     (2 panes: left | right)")
+    print("  t = tall-left          (3 panes: big left | top-right / bottom-right)")
+    layout = input("  Layout [v/t]: ").strip().lower()
+    n = 2 if layout == "v" else 3
+    nums = input(f"  Pane numbers ({n} needed, e.g. {' '.join(str(i) for i in range(1,n+1))}): ").split()
+    tabs.append({"layout": layout, "panes": [pane_list[int(x)-1] for x in nums[:n]]})
+
+default_cmd = input("\nCommand for project panes [claude-default]: ").strip() or "claude-default"
+
+def cmd(cwd):
+    return None if cwd == home else f"zsh -ic 'cd {cwd} && {default_cmd}; exec zsh'"
+
+for i, tab in enumerate(tabs):
+    path = os.path.join(tmp_dir, f"tab{i+1}.sh")
+    panes, layout = tab["panes"], tab["layout"]
+    lines = ["#!/usr/bin/env bash", f'PROFILE="{profile}"', "sleep 0.5", ""]
+
+    if layout == "v":
+        c = cmd(panes[1]["cwd"])
+        lines += [f'tilix -a session-add-right -p "$PROFILE" {f"-e \\"{c}\\"" if c else f"-w \\"{panes[1][\"cwd\"]}\\""}', "sleep 0.3"]
+    else:
+        for action, idx in [("session-add-right", 1), ("session-add-down", 2)]:
+            c = cmd(panes[idx]["cwd"])
+            lines += [f'tilix -a {action} -p "$PROFILE" {f"-e \\"{c}\\"" if c else f"-w \\"{panes[idx][\"cwd\"]}\\""}', "sleep 0.3"]
+
+    if i < len(tabs) - 1:
+        nxt = os.path.join(tmp_dir, f"tab{i+2}.sh")
+        lines += ["tilix -a app-new-session", "sleep 0.8", f'xdotool type "bash {nxt}"', "xdotool key Return", "sleep 0.5"]
+
+    c0 = cmd(panes[0]["cwd"])
+    lines += [f'cd "{panes[0]["cwd"]}"', f"exec {c0}" if c0 else "exec zsh"]
+
+    with open(path, "w") as f:
+        f.write("\n".join(lines) + "\n")
+    os.chmod(path, stat.S_IRWXU | stat.S_IRGRP | stat.S_IROTH)
+
+print(f"\nReady — launching Tilix with {len(tabs)} tab(s)...")
+PYEOF
+
+    python3 "$tmp_dir/helper.py" "$panes_file" "$profile" "$tmp_dir" "$HOME" || {
+        rm -rf "$tmp_dir"; die "Restore cancelled"
+    }
+
+    [[ ! -f "$tmp_dir/tab1.sh" ]] && { rm -rf "$tmp_dir"; die "No setup script generated"; }
+    tilix -e "bash $tmp_dir/tab1.sh" &
+    disown
 
 _build_layout_json() {
     # Writes a Tilix session JSON to both our state dir and Tilix's session store.
@@ -415,12 +538,14 @@ COMMAND="${1:-help}"
 shift 2>/dev/null || true
 
 case "$COMMAND" in
-    save)      cmd_save ;;
-    restore)   cmd_restore ;;
-    attach)    cmd_attach "$@" ;;
-    status)    cmd_status ;;
-    install)   cmd_install ;;
-    uninstall) cmd_uninstall ;;
+    save)         cmd_save ;;
+    restore)      cmd_restore ;;
+    pane-save)    cmd_pane_save ;;
+    pane-restore) cmd_pane_restore ;;
+    attach)       cmd_attach "$@" ;;
+    status)       cmd_status ;;
+    install)      cmd_install ;;
+    uninstall)    cmd_uninstall ;;
     help|--help|-h)
         grep '^#' "$0" | grep -E 'tilix-session|Usage|  [a-z]' | sed 's/^# //'
         ;;
